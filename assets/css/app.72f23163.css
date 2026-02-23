@@ -64,12 +64,12 @@ html {
 }
 
 #app {
-	 background: url("https://raw.githubusercontent.com/Bilgee2026/asahisuperdry.mn/refs/heads/main/assets/images/background.png") no-repeat center center;
-  background-size: cover;
+	background: url("https://raw.githubusercontent.com/Bilgee2026/asahisuperdry.mn/refs/heads/main/assets/images/background.png") no-repeat center center;
+  	background-size: cover;
 	background: -moz-linear-gradient(210deg, #ff462d .13%, #ff422f 26.19%, #ff3634 52.6%, #ff223c 79.08%, #ff0c45 100%);
 	background: -o-linear-gradient(210deg, #ff462d .13%, #ff422f 26.19%, #ff3634 52.6%, #ff223c 79.08%, #ff0c45 100%);
 	background: linear-gradient(240deg, #ff462d .13%, #ff422f 26.19%, #ff3634 52.6%, #ff223c 79.08%, #ff0c45);
-	color: #fff;
+
 	display: -moz-box;
 	display: flex;
 	min-height: 100%;
