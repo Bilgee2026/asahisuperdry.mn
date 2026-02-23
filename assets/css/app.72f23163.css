@@ -207,7 +207,7 @@ a:hover {
 }
 
 .solid-button:disabled:hover {
-	background-color: #ffbf1f
+	background-color: #fff
 }
 
 .solid-button--danger {
