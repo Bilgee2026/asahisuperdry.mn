@@ -64,7 +64,7 @@ html {
 }
 
 #app {
-	background: url("../assets/images/background.png") no-repeat center center;
+	background: url("../images/background.png") no-repeat center center;
   background-size: cover;
   background-position: center;
   display: flex;
