@@ -180,7 +180,7 @@ a:hover {
 	-webkit-appearance: none;
 	-moz-appearance: none;
 	appearance: none;
-	background-color: #ffbf1f;
+	background-color: #d20a11;
 	border: none;
 	border-radius: .625rem;
 	box-shadow: .625rem .625rem 0 rgba(0, 0, 0, .2);
@@ -199,7 +199,7 @@ a:hover {
 }
 
 .solid-button:hover {
-	background-color: #ffc639
+	background-color: #000
 }
 
 .solid-button:disabled {
@@ -501,7 +501,7 @@ a:hover {
 }
 
 .slot__outer {
-	background: #ffbf1f url(../images/light-blubs.0d2ddfd6.svg);
+	background: #d20a11 url(../images/light-blubs.0d2ddfd6.svg);
 	box-shadow: .625rem .625rem 0 rgba(0, 0, 0, .2);
 	height: 14.375rem;
 	margin: 0 auto;
