@@ -64,10 +64,11 @@ html {
 }
 
 #app {
-	 background: url("https://raw.githubusercontent.com/Bilgee2026/asahisuperdry.mn/main/assets/images/background.png") no-repeat center center;
+  background:
+    linear-gradient(240deg, rgba(255,70,45,0.7), rgba(255,12,69,0.7)),
+    url("https://raw.githubusercontent.com/Bilgee2026/asahisuperdry.mn/main/assets/images/background.png");
   background-size: cover;
-
-  color: #fff;
+  background-position: center;
   display: flex;
   min-height: 100%;
   overflow: hidden;
