@@ -12016,7 +12016,7 @@ var JotForm = {
             // only extend new addEventListner to JOTFORM forms
             // do not include CONST.SUBMIT_OBSERVER_NAME
             if (isDebugEnabled) console.log({ eventKey, handler, options });
-            if (!JotForm.isValidJotform(this) || handler.name === CONST.SUBMIT_OBSERVER_NAME) {
+            if (!JotForm.isValidJotform(this) || handler.name === CONST.SUBMIT_OBSERVER_NAME || eventKey !== 'submit') {
                 _originalFormAddEventListener.apply(this, arguments);
                 return;
             }
@@ -12147,6 +12147,11 @@ var JotForm = {
             trackExecution('observerSubmitHandler_validation-passed-submitting-form');
             trackSubmitDate();
             addLogEvent({ id, observerSubmitEvent, info: 'Validation Complete. Valid Submit.' });
+
+            // Dispatch custom event indicating validation passed and form is being submitted
+            const event = new CustomEvent('EventObserver-form-submitted', { detail: { form: formObserver.form } });
+            document.dispatchEvent(event);
+
             // form.submit() will be called directly.
             _originalFormSubmitMethod.apply(formObserver.form);
         }
@@ -12970,64 +12975,93 @@ var JotForm = {
                     const searchParams = new URLSearchParams(window.location.search);
                     const isChatgptApp = searchParams.get('app') === 'chatgpt'
                     const isAutopilot = searchParams.get('appName') === 'autopilot-form-agent';
+                    const isFormMcpUIView = isChatgptApp || isAutopilot || JotForm.isMCPUI;
                     const hideFieldsOnInit = searchParams.get('hideFieldsOnInit') || JotForm.hiddenFieldsOnInit;
                     const editedQuestions = searchParams.get('editedQuestions') || JotForm.editedQuestions;
-                    if ((isChatgptApp || isAutopilot) && (hideFieldsOnInit || editedQuestions)) {
+                    if (isFormMcpUIView) {
+                        const formViewStyles = document.createElement('style');
+                        formViewStyles.textContent = `
+                            .error-navigation-container { display: none !important; }
+                            .form-all { margin: 2rem auto; width: 90%; max-width: none; }
+                        `;
+                        document.head.appendChild(formViewStyles);
+                    }
+                    if (isFormMcpUIView && (hideFieldsOnInit || editedQuestions)) {
                         const handleChanges = function(changes) {
-                            const animateQuestion = (qid, animationType) => {
-                                if (!editedQuestions) return;
-                                const questionElement = document.getElementById('id_' + qid);
-                                if (!questionElement) return;
-                                const currentCenter = window.innerHeight / 2;
-                                // dont scroll if question is already above center
-                                if (questionElement.getBoundingClientRect().top > currentCenter) {
-                                    questionElement.scrollTo({ top: 0, behavior: 'smooth' });
-                                }
-                                // Remove any existing animation classes
-                                questionElement.classList.remove(
-                                    'form-change-animate-created',
-                                    'form-change-animate-deleted',
-                                    'form-change-animate-updated'
-                                );
+                            async function animate(el, keyframes, duration) {
+                                const anim = el.animate(keyframes, { duration, easing: 'ease-out', fill: 'forwards' });
+                                await anim.finished;
+                                anim.commitStyles();
+                                anim.cancel();
+                            }
 
-                                // Force reflow to restart animation
-                                void questionElement.offsetWidth;
+                            const runCreatedAnimation = async (qid) => {
+                                const qel = document.getElementById('id_' + qid);
+                                qel.style.cssText = 'max-height:0; border-radius: 8px; background:transparent; overflow:hidden;';
+                                [...qel.children].forEach(c => c.style.opacity = 0);
 
-                                // Add the appropriate animation class
-                                questionElement.classList.add(`form-change-animate-${animationType}`);
+                                await animate(qel, [{ maxHeight: '0px' }, { maxHeight: '1000px' }], 1000);
 
-                                if (animationType === 'deleted') {
-                                    questionElement.addEventListener('animationend', () => {
-                                        questionElement.remove();
-                                    });
-                                }
-                                if (animationType === 'created') {
-                                    questionElement.addEventListener('animationend', () => {
-                                        questionElement.classList.remove('form-change-animate-created');
-                                    });
-                                }
-                            };
+                                await new Promise(resolve => {
+                                    const onEnd = (e) => {
+                                        if (e.propertyName === 'height' && e.pseudoElement === '::after') {
+                                            qel.removeEventListener('transitionend', onEnd);
+                                            qel.classList.remove('created-active');
+                                            qel.style.border = '2px solid #0075E3';
+                                            resolve();
+                                        }
+                                    };
+                                    qel.addEventListener('transitionend', onEnd);
+                                    qel.classList.add('created-active');
+                                });
+
+                                await animate(qel, [{ background: 'transparent' }, { background: 'rgba(0, 117, 227, 0.10)' }], 600);
+                                await Promise.all([...qel.children].map(c => animate(c, [{ opacity: 0 }, { opacity: 1 }], 600)));
+                                await Promise.all([
+                                    animate(qel, [{ background: 'rgba(0, 117, 227, 0.10)' }, { background: 'transparent' }], 300),
+                                    animate(qel, [{ border: '2px solid #0075E3' }, { borderColor: 'transparent' }], 300)
+                                ])
+                            }
+
+                            const runDeletedAnimation = async (qid) => {
+                                const qel = document.getElementById('id_' + qid);
+                                qel.style.cssText = 'border-radius: 8px; background:transparent; overflow:hidden;';
+
+                                await new Promise(resolve => {
+                                    const onEnd = (e) => {
+                                        if (e.propertyName === 'height' && e.pseudoElement === '::after') {
+                                            qel.removeEventListener('transitionend', onEnd);
+                                            qel.classList.remove('deleted-active');
+                                            qel.style.border = '2px solid #DC2626'
+                                            resolve();
+                                        }
+                                    };
+                                    qel.addEventListener('transitionend', onEnd);
+                                    qel.classList.add('deleted-active');
+                                });
+                                await animate(qel, [{ background: 'transparent' }, { background: 'rgba(220, 38, 38, 0.10)' }], 1000);
+                                await animate(qel, [{ opacity: 1 }, { opacity: 0 }], 600);
+                                qel.remove();
+                            }
 
                             if (changes.created && Array.isArray(changes.created)) {
                                 changes.created.forEach((item, index) => {
+                                    const questionElement = document.querySelector('#id_' + item.qid);
+                                    questionElement.classList.add('question-draw');
+                                    questionElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                     setTimeout(() => {
-                                        animateQuestion(item.qid, 'created');
+                                        runCreatedAnimation(item.qid);
                                     }, index * 100); // Stagger by 100ms
                                 });
                             }
 
                             if (changes.deleted && Array.isArray(changes.deleted)) {
                                 changes.deleted.forEach((item, index) => {
+                                    const questionElement = document.querySelector('#id_' + item.qid);
+                                    questionElement.classList.add('question-draw');
+                                    questionElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                     setTimeout(() => {
-                                        animateQuestion(item.qid, 'deleted');
-                                    }, index * 100);
-                                });
-                            }
-
-                            if (changes.deleted && !(changes.deleted.length > 0) && changes.created && !(changes.created.length > 0) && changes.updated && changes.updated.length > 0) {
-                                changes.updated.forEach((item, index) => {
-                                    setTimeout(() => {
-                                        animateQuestion(item.qid, 'updated');
+                                        runDeletedAnimation(item.qid);
                                     }, index * 100);
                                 });
                             }
@@ -13040,8 +13074,8 @@ var JotForm = {
                                 return new Promise((resolve) => {
                                     el.scrollIntoView({ behavior: 'smooth', block: isChatgptApp ? 'center' : 'nearest' });
                                     const onScrollEnd = () => {
-                                        el.addEventListener('animationend', () => { 
-                                            el.style.opacity = '1'; 
+                                        el.addEventListener('animationend', () => {
+                                            el.style.opacity = '1';
                                             resolve();
                                         });
                                         el.style.animation = 'question-initial 1s forwards';
@@ -13077,306 +13111,78 @@ var JotForm = {
                                 }
                             }
 
-                            @keyframes form-change-created {
-                                0% {
-                                    transform: translateY(0);
-                                }
-                                10% {
-                                    transform: translateY(-15px);
-                                }
-                                20% {
-                                    transform: translateY(0);
-                                }
-                                30% {
-                                    transform: translateY(-12px);
-                                }
-                                40% {
-                                    transform: translateY(0);
-                                }
-                                50% {
-                                    transform: translateY(-10px);
-                                    border-color: rgba(0, 128, 0, 1);
-                                }
-                                60% {
-                                    transform: translateY(0);
-                                }
-                                70% {
-                                    transform: translateY(-7px);
-                                }
-                                75% {
-                                    border-color: rgba(0, 128, 0, 0.5);
-                                }
-                                80% {
-                                    transform: translateY(0);
-                                }
-                                90% {
-                                    transform: translateY(-4px);
-                                }
-                                100% {
-                                    transform: translateY(0);
-                                    border-color: rgba(0, 128, 0, 0);
-                                }
-                            }
+                            .question-draw {
+                                --radius: 10px;
 
-                            @keyframes form-change-deleted {
-                                0% {
-                                    opacity: 1;
-                                    transform: scale(1);
-                                    mask-image: none;
-                                    filter: blur(0px);
-                                }
-                                10% {
-                                    opacity: 0.97;
-                                    mask-image: radial-gradient(circle at 20% 30%, black 70%, transparent 88%),
-                                                radial-gradient(circle at 80% 70%, black 68%, transparent 86%),
-                                                radial-gradient(circle at 50% 20%, black 66%, transparent 84%),
-                                                radial-gradient(circle at 10% 80%, black 64%, transparent 82%),
-                                                radial-gradient(circle at 90% 40%, black 69%, transparent 87%),
-                                                radial-gradient(circle at 40% 60%, black 62%, transparent 80%),
-                                                radial-gradient(circle at 70% 10%, black 60%, transparent 78%),
-                                                radial-gradient(circle at 15% 50%, black 58%, transparent 76%),
-                                                radial-gradient(circle at 85% 90%, black 56%, transparent 74%),
-                                                radial-gradient(circle at 60% 80%, black 54%, transparent 72%),
-                                                radial-gradient(circle at 30% 15%, black 52%, transparent 70%),
-                                                radial-gradient(circle at 75% 50%, black 50%, transparent 68%),
-                                                radial-gradient(circle at 25% 75%, black 48%, transparent 66%),
-                                                radial-gradient(circle at 55% 45%, black 46%, transparent 64%),
-                                                radial-gradient(circle at 65% 25%, black 44%, transparent 62%);
-                                    filter: blur(0.3px);
-                                }
-                                20% {
-                                    opacity: 0.92;
-                                    mask-image: radial-gradient(circle at 20% 30%, black 62%, transparent 78%),
-                                                radial-gradient(circle at 80% 70%, black 60%, transparent 76%),
-                                                radial-gradient(circle at 50% 20%, black 58%, transparent 74%),
-                                                radial-gradient(circle at 10% 80%, black 56%, transparent 72%),
-                                                radial-gradient(circle at 90% 40%, black 61%, transparent 77%),
-                                                radial-gradient(circle at 40% 60%, black 54%, transparent 70%),
-                                                radial-gradient(circle at 70% 10%, black 52%, transparent 68%),
-                                                radial-gradient(circle at 15% 50%, black 50%, transparent 66%),
-                                                radial-gradient(circle at 85% 90%, black 48%, transparent 64%),
-                                                radial-gradient(circle at 60% 80%, black 46%, transparent 62%),
-                                                radial-gradient(circle at 30% 15%, black 44%, transparent 60%),
-                                                radial-gradient(circle at 75% 50%, black 42%, transparent 58%),
-                                                radial-gradient(circle at 25% 75%, black 40%, transparent 56%),
-                                                radial-gradient(circle at 55% 45%, black 38%, transparent 54%);
-                                    filter: blur(0.8px);
-                                }
-                                30% {
-                                    opacity: 0.85;
-                                    mask-image: radial-gradient(circle at 20% 30%, black 54%, transparent 68%),
-                                                radial-gradient(circle at 80% 70%, black 52%, transparent 66%),
-                                                radial-gradient(circle at 50% 20%, black 50%, transparent 64%),
-                                                radial-gradient(circle at 10% 80%, black 48%, transparent 62%),
-                                                radial-gradient(circle at 90% 40%, black 53%, transparent 67%),
-                                                radial-gradient(circle at 40% 60%, black 46%, transparent 60%),
-                                                radial-gradient(circle at 70% 10%, black 44%, transparent 58%),
-                                                radial-gradient(circle at 15% 50%, black 42%, transparent 56%),
-                                                radial-gradient(circle at 85% 90%, black 40%, transparent 54%),
-                                                radial-gradient(circle at 60% 80%, black 38%, transparent 52%),
-                                                radial-gradient(circle at 30% 15%, black 36%, transparent 50%),
-                                                radial-gradient(circle at 75% 50%, black 34%, transparent 48%),
-                                                radial-gradient(circle at 25% 75%, black 32%, transparent 46%);
-                                    filter: blur(1.5px);
-                                }
-                                40% {
-                                    opacity: 0.8;
-                                    mask-image: radial-gradient(circle at 20% 30%, black 46%, transparent 58%),
-                                                radial-gradient(circle at 80% 70%, black 44%, transparent 56%),
-                                                radial-gradient(circle at 50% 20%, black 42%, transparent 54%),
-                                                radial-gradient(circle at 10% 80%, black 40%, transparent 52%),
-                                                radial-gradient(circle at 90% 40%, black 45%, transparent 57%),
-                                                radial-gradient(circle at 40% 60%, black 38%, transparent 50%),
-                                                radial-gradient(circle at 70% 10%, black 36%, transparent 48%),
-                                                radial-gradient(circle at 15% 50%, black 34%, transparent 46%),
-                                                radial-gradient(circle at 85% 90%, black 32%, transparent 44%),
-                                                radial-gradient(circle at 60% 80%, black 30%, transparent 42%),
-                                                radial-gradient(circle at 30% 15%, black 28%, transparent 40%),
-                                                radial-gradient(circle at 75% 50%, black 26%, transparent 38%);
-                                    filter: blur(2px);
-                                }
-                                50% {
-                                    opacity: 0.7;
-                                    mask-image: radial-gradient(circle at 20% 30%, black 38%, transparent 48%),
-                                                radial-gradient(circle at 80% 70%, black 36%, transparent 46%),
-                                                radial-gradient(circle at 50% 20%, black 34%, transparent 44%),
-                                                radial-gradient(circle at 10% 80%, black 32%, transparent 42%),
-                                                radial-gradient(circle at 90% 40%, black 37%, transparent 47%),
-                                                radial-gradient(circle at 40% 60%, black 30%, transparent 40%),
-                                                radial-gradient(circle at 70% 10%, black 28%, transparent 38%),
-                                                radial-gradient(circle at 15% 50%, black 26%, transparent 36%),
-                                                radial-gradient(circle at 85% 90%, black 24%, transparent 34%),
-                                                radial-gradient(circle at 60% 80%, black 22%, transparent 32%),
-                                                radial-gradient(circle at 30% 15%, black 20%, transparent 30%);
-                                    filter: blur(3px);
-                                }
-                                60% {
-                                    opacity: 0.6;
-                                    mask-image: radial-gradient(circle at 20% 30%, black 30%, transparent 38%),
-                                                radial-gradient(circle at 80% 70%, black 28%, transparent 36%),
-                                                radial-gradient(circle at 50% 20%, black 26%, transparent 34%),
-                                                radial-gradient(circle at 10% 80%, black 24%, transparent 32%),
-                                                radial-gradient(circle at 90% 40%, black 29%, transparent 37%),
-                                                radial-gradient(circle at 40% 60%, black 22%, transparent 30%),
-                                                radial-gradient(circle at 70% 10%, black 20%, transparent 28%),
-                                                radial-gradient(circle at 15% 50%, black 18%, transparent 26%),
-                                                radial-gradient(circle at 85% 90%, black 16%, transparent 24%);
-                                    filter: blur(4px);
-                                }
-                                70% {
-                                    opacity: 0.45;
-                                    mask-image: radial-gradient(circle at 20% 30%, black 22%, transparent 28%),
-                                                radial-gradient(circle at 80% 70%, black 20%, transparent 26%),
-                                                radial-gradient(circle at 50% 20%, black 18%, transparent 24%),
-                                                radial-gradient(circle at 10% 80%, black 16%, transparent 22%),
-                                                radial-gradient(circle at 90% 40%, black 21%, transparent 27%),
-                                                radial-gradient(circle at 40% 60%, black 12%, transparent 18%),
-                                                radial-gradient(circle at 70% 10%, black 10%, transparent 16%);
-                                    filter: blur(5px);
-                                }
-                                80% {
-                                    opacity: 0.3;
-                                    mask-image: radial-gradient(circle at 20% 30%, black 15%, transparent 20%),
-                                                radial-gradient(circle at 80% 70%, black 12%, transparent 18%),
-                                                radial-gradient(circle at 50% 20%, black 10%, transparent 15%),
-                                                radial-gradient(circle at 10% 80%, black 8%, transparent 13%),
-                                                radial-gradient(circle at 90% 40%, black 14%, transparent 19%);
-                                    filter: blur(6px);
-                                }
-                                90% {
-                                    opacity: 0.15;
-                                    mask-image: radial-gradient(circle at 20% 30%, black 8%, transparent 12%),
-                                                radial-gradient(circle at 80% 70%, black 6%, transparent 10%),
-                                                radial-gradient(circle at 50% 20%, transparent 0%, transparent 0%),
-                                                radial-gradient(circle at 10% 80%, transparent 0%, transparent 0%),
-                                                radial-gradient(circle at 90% 40%, black 7%, transparent 11%);
-                                    filter: blur(8px);
-                                }
-                                100% {
-                                    opacity: 0;
-                                    transform: scale(1);
-                                    mask-image: radial-gradient(circle at 20% 30%, transparent 0%, transparent 0%),
-                                                radial-gradient(circle at 80% 70%, transparent 0%, transparent 0%),
-                                                radial-gradient(circle at 50% 20%, transparent 0%, transparent 0%),
-                                                radial-gradient(circle at 10% 80%, transparent 0%, transparent 0%),
-                                                radial-gradient(circle at 90% 40%, transparent 0%, transparent 0%);
-                                    mask-size: 100% 100%;
-                                    mask-composite: intersect;
-                                    filter: blur(10px);
-                                }
-                            }
-                            
-                            .form-change-animate-updated {
                                 position: relative;
-                                overflow: hidden;
-                                clip-path: inset(0% 0% 100% 0%);
-                                -webkit-clip-path: inset(0% 0% 100% 0%);
-                                animation: update-field-fade 0.4s ease-in forwards,
-                                        update-field-reveal 1.5s ease-out 0.4s forwards;
+                                transition: color 0.25s;
+                                border-radius: var(--radius);
                             }
 
-                            .form-change-animate-updated::before {
-                                content: '';
+                            .question-draw::before,
+                            .question-draw::after {
+                                content: "";
                                 position: absolute;
-                                top: -4px;
-                                left: 0;
-                                right: 0;
-                                height: 4px;
-                                background: #22c55e;
-                                z-index: 1000;
-                                opacity: 0;
-                                animation: update-line-sweep 1.5s ease-out 0.4s forwards;
-                                box-shadow: 0 0 8px rgba(34, 197, 94, 0.6), 
-                                        0 2px 4px rgba(34, 197, 94, 0.4);
+                                border: 2px solid transparent;
+                                border-radius: var(--radius);
+                                width: 0;
+                                height: 0;
                             }
 
-                            .form-change-animate-updated::after {
-                                content: '';
-                                position: absolute;
+                            .question-draw::before {
                                 top: 0;
                                 left: 0;
+                            }
+
+                            .question-draw::after {
+                                bottom: 0;
                                 right: 0;
+                            }
+
+                            .question-draw.created-active {
+                                color: #0075E3;
+                            }
+
+                            .question-draw.created-active::before,
+                            .question-draw.deleted-active::before,
+                            .question-draw.created-active::after,
+                            .question-draw.deleted-active::after {
                                 width: 100%;
-                                height: 0%;
-                                background: linear-gradient(to bottom,
-                                    rgba(34, 197, 94, 0.35) 0%,
-                                    rgba(34, 197, 94, 0.25) 30%,
-                                    rgba(34, 197, 94, 0.15) 60%,
-                                    rgba(34, 197, 94, 0.05) 90%,
-                                    transparent 100%);
-                                z-index: 999;
-                                animation: update-background-sweep 1.5s ease-out 0.4s forwards;
-                                pointer-events: none;
+                                height: 100%;
                             }
 
-                            @keyframes update-line-sweep {
-                                0% {
-                                    top: -4px;
-                                    opacity: 0;
-                                }
-                                5% {
-                                    opacity: 1;
-                                }
-                                90% {
-                                    opacity: 1;
-                                }
-                                100% {
-                                    top: 100%;
-                                    opacity: 0;
-                                }
+                            .question-draw.created-active::before {
+                                border-top-color: #0075E3;
+                                border-right-color: #0075E3;
+                                transition:
+                                    width 0.25s ease-out,
+                                    height 0.25s ease-out 0.25s;
                             }
 
-                            @keyframes update-background-sweep {
-                                0% {
-                                    height: 0%;
-                                    opacity: 0.35;
-                                }
-                                50% {
-                                    opacity: 0.3;
-                                }
-                                100% {
-                                    height: 100%;
-                                    opacity: 0;
-                                }
+                            .question-draw.deleted-active::before {
+                                border-top-color: #DC2626;
+                                border-right-color: #DC2626;
+                                transition:
+                                    width 0.5s ease-out,
+                                    height 0.25s ease-out 0.5s;
                             }
 
-                            @keyframes update-field-fade {
-                                0% {
-                                    opacity: 1;
-                                }
-                                100% {
-                                    opacity: 0;
-                                }
+                            .question-draw.deleted-active::after {
+                                border-bottom-color: #DC2626;
+                                border-left-color: #DC2626;
+                                transition:
+                                    border-color 0s ease-out 0.75s,
+                                    width 0.5s ease-out 0.75s,
+                                    height 0.25s ease-out 1.25s;
                             }
 
-                            @keyframes update-field-reveal {
-                                0% {
-                                    clip-path: inset(0% 0% 100% 0%);
-                                    -webkit-clip-path: inset(0% 0% 100% 0%);
-                                    opacity: 0;
-                                }
-                                100% {
-                                    clip-path: inset(0% 0% 0% 0%);
-                                    -webkit-clip-path: inset(0% 0% 0% 0%);
-                                    opacity: 1;
-                                }
-                            }
-
-                            .form-change-animate-created {
-                                animation: form-change-created 4s ease-out forwards;
-                                animation-delay: 0.5s;
-                                mask-composite: add;
-                                -webkit-mask-composite: add;
-                                border: 2px solid rgba(0, 128, 0, 1);
-                                border-radius: 1rem;
-                            }
-
-                            .form-change-animate-deleted {
-                                animation: form-change-deleted 3s ease-in forwards;
-                                animation-delay: 0.5s;
-                                pointer-events: none;
-                                mask-composite: add;
-                                -webkit-mask-composite: add;
+                            .question-draw.created-active::after {
+                                border-bottom-color: #0075E3;
+                                border-left-color: #0075E3;
+                                transition:
+                                    border-color 0s ease-out 0.5s,
+                                    width 0.25s ease-out 0.5s,
+                                    height 0.25s ease-out 0.75s;
                             }
                         `;
                         document.head.appendChild(formChangesAnimationStyle);
@@ -14997,7 +14803,7 @@ var JotForm = {
                                 uploadedFiles.push(uploadHiddenInput.value);
                                 uploadedFileInput.value = JSON.stringify(uploadedFiles);
                             }
-                            
+
                             // eslint-disable-next-line no-var
                             var fileServerInput = document.getElementById('file_server');
                             if (!fileServerInput) {
@@ -16630,7 +16436,8 @@ var JotForm = {
                         limitError = true;
                     }
                 }
-                if (erroredElement && active!=yearElement && active!=monthElement && active!=dayElement) {
+                const isFocusedOnDateInput = active === yearElement || active === monthElement || active === dayElement;
+                if (erroredElement && !isFocusedOnDateInput) {
                     if (erroredElement === hourElement || erroredElement === minElement) {
                         erroredElement.errored = false;
                         JotForm.errored(erroredElement, JotForm.texts.invalidTime);
@@ -16649,7 +16456,8 @@ var JotForm = {
                     dateElement.classList.add('form-line-error');
                     dateElement.classList.add('form-datetime-validation-error');
                     return false;
-                } else {
+                }
+                if (!erroredElement) {
                     JotForm.corrected(monthElement);
                     JotForm.corrected(dayElement);
                     JotForm.corrected(yearElement);
@@ -16659,8 +16467,9 @@ var JotForm = {
                     }
                     dateElement.classList.remove('form-line-error');
                     dateElement.classList.remove('form-datetime-validation-error');
+                    return true;
                 }
-                return true;
+                return false;
             };
 
             if (hourElement && minElement) {
@@ -18296,7 +18105,7 @@ var JotForm = {
 
             // only post a message when its ready to receive a post message
             if (frame && isFrameXDready) {
-                 
+
                 window.XD.postMessage(JSON.stringify({type: "disable", qid: id}), referrer, frame);
             }
         }
@@ -18589,6 +18398,26 @@ var JotForm = {
         } else if (["braintree", "stripe", "paypalpro", "authnet"].includes(type)) {
             document.querySelector('#id_' + field).querySelectorAll('input[type="text"], .form-address-country').forEach(function (el) {
                 el.value = (el.id in JotForm.defaultValues) ? JotForm.defaultValues[el.id] : "";
+            });
+            // Keep payment reset behavior consistent with form reset:
+            // clear selected product inputs when conditionally hidden.
+            document.querySelector('#id_' + field).querySelectorAll('.form-product-input:checked').forEach(function (item) {
+                if (item.type === 'radio') {
+                    item.checked = false;
+                    if (item.triggerEvent) {
+                        item.triggerEvent('change');
+                    }
+                    return;
+                }
+
+                if (window.FORM_MODE !== 'cardform') {
+                    item.click();
+                } else {
+                    item.checked = false;
+                    if (item.triggerEvent) {
+                        item.triggerEvent('change');
+                    }
+                }
             });
         } else if (type === "html") {
             try {
@@ -21142,7 +20971,7 @@ var JotForm = {
                     fieldId = slicedQid[1];
                   }
 
-                   
+
                   var tempInput = $('input_' + questionId + '_field_' + fieldId); // eslint-disable-line
 
                   if (tempInput && typeof tempInput.value !== 'undefined') {
@@ -22217,7 +22046,7 @@ var JotForm = {
 
                                 if (specOp === 'pow') { // This check can be removed and this fix can be applied to all mathematical functions but I'm not sure yet.
                                     if (typeof BigInt === 'function' && tempValue > Number.MAX_SAFE_INTEGER) { // Only try to use BigInt if the number is bigger than the MAX_SAFE_INTEGER constant.
-                                         
+
                                         tempValue = BigInt(tempValue).toString();
                                     } else if (tempValue < 1 && copyZero) {
                                         tempValue = tempValue.toFixed(calc.decimalPlaces);
@@ -26794,6 +26623,22 @@ var JotForm = {
         // }
     },
 
+    setStripeACHSettings: function (pubkey) {
+        if (JotForm.isEditMode() || document.get.sid) {
+          return;
+        }
+
+        if (pubkey) {
+            // eslint-disable-next-line no-var
+            var clean_pubkey = pubkey.replace(/\s+/g, '');
+            if (clean_pubkey === '') {
+                console.log('Stripe publishable key is empty. You need to connect your form using Stripe connect.');
+                return;
+            }
+            JotForm.stripePubKey = pubkey;
+        }
+    },
+
     /**
      * Initialize filepickerIO uploader
      * @param options - the filepickerIO options
@@ -29884,7 +29729,7 @@ var JotForm = {
         if (formAdvancedWrapper) {
             canvas = formAdvancedWrapper.querySelector('.signatureCanvas');
         }
-        
+
         if (!canvas) {
             canvas = container.select('.signatureCanvas').first();
         }
@@ -29910,7 +29755,7 @@ var JotForm = {
             var wrapper = new Element('div', {
                 class: 'static-signature-wrapper'
             });
-            
+
             // Ensure wrapper is visible
             wrapper.style.position = 'absolute';
             wrapper.style.top = '0';
@@ -29929,7 +29774,7 @@ var JotForm = {
                 id: 'signature-pad-image-' + qid,
                 class: 'signature-image-' + qid + ' static-signature-image'
             });
-            
+
             // Ensure image is visible
             img.style.maxWidth = '90%';
             img.style.maxHeight = '90%';
@@ -30604,7 +30449,7 @@ var JotForm = {
         var content = document.createElement('div');
         content.className = 'form-description-content';
         if (typeof input === 'string') {
-            content.id = `${input}-description`; 
+            content.id = `${input}-description`;
         }
         // eslint-disable-next-line no-var
         var indicator;
@@ -31012,7 +30857,7 @@ var JotForm = {
         // is a potential cause for blank submissions or missing fields and for the moment we just want to understand
         // what is calling `errored` in this way
         const errorMessage = typeof message === 'string' ? message : (message.message || '');
-        
+
         if (Object.keys(JotForm.visitedPages || {}).length) {
             // eslint-disable-next-line no-var
             var allSections = Array.from(document.querySelectorAll('.page-section'));
@@ -33161,10 +33006,10 @@ var JotForm = {
                     // Parse URL: [protocol]://[host].[extension]/[path]
                     // If protocol is missing, default to 'https'
                     try {
-                    let checkUrlValue = input.value;
-                    if (!checkUrlValue.match(/^[a-zA-Z]+:\/\//i)) {
-                        checkUrlValue = 'https://' + checkUrlValue;
-                    }
+                        let checkUrlValue = input.value;
+                        if (!/^[a-zA-Z]+:\/\//i.test(checkUrlValue) && (/^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}/.test(checkUrlValue))) {
+                            checkUrlValue = 'https://' + checkUrlValue;
+                        }
                         new URL(checkUrlValue);
                     } catch (error) {
                         return JotForm.errored(input, JotForm.texts.url, dontShowMessage);
@@ -37311,6 +37156,7 @@ function nameInputListenerForAssistantTooltip() {
       console.log(e);
   }
 }
+
 //
 // CalendarView (for Prototype)
 // calendarview.org
