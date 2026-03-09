@@ -12970,7 +12970,7 @@ var JotForm = {
                     });
 
                     /**
-                     * For ChatGPT App & Jotform AI, we want to run some animations on form load
+                     * For MCP Apps & Jotform AI, we want to run some animations on form load.
                      */
                     const searchParams = new URLSearchParams(window.location.search);
                     const isChatgptApp = searchParams.get('app') === 'chatgpt'
@@ -12978,94 +12978,40 @@ var JotForm = {
                     const isFormMcpUIView = isChatgptApp || isAutopilot || JotForm.isMCPUI;
                     const hideFieldsOnInit = searchParams.get('hideFieldsOnInit') || JotForm.hiddenFieldsOnInit;
                     const editedQuestions = searchParams.get('editedQuestions') || JotForm.editedQuestions;
-                    if (isFormMcpUIView) {
-                        const formViewStyles = document.createElement('style');
-                        formViewStyles.textContent = `
-                            .error-navigation-container { display: none !important; }
-                            .form-all { margin: 2rem auto; width: 90%; max-width: none; }
-                        `;
-                        document.head.appendChild(formViewStyles);
-                    }
                     if (isFormMcpUIView && (hideFieldsOnInit || editedQuestions)) {
-                        const handleChanges = function(changes) {
-                            async function animate(el, keyframes, duration) {
-                                const anim = el.animate(keyframes, { duration, easing: 'ease-out', fill: 'forwards' });
-                                await anim.finished;
-                                anim.commitStyles();
-                                anim.cancel();
-                            }
+                        const animateQuestion = async (qid, animationName) => {
+                            const questionElement = document.querySelector('#id_' + qid);
+                            if (!questionElement) return;
 
-                            const runCreatedAnimation = async (qid) => {
-                                const qel = document.getElementById('id_' + qid);
-                                qel.style.cssText = 'max-height:0; border-radius: 8px; background:transparent; overflow:hidden;';
-                                [...qel.children].forEach(c => c.style.opacity = 0);
-
-                                await animate(qel, [{ maxHeight: '0px' }, { maxHeight: '1000px' }], 1000);
-
-                                await new Promise(resolve => {
-                                    const onEnd = (e) => {
-                                        if (e.propertyName === 'height' && e.pseudoElement === '::after') {
-                                            qel.removeEventListener('transitionend', onEnd);
-                                            qel.classList.remove('created-active');
-                                            qel.style.border = '2px solid #0075E3';
-                                            resolve();
-                                        }
-                                    };
-                                    qel.addEventListener('transitionend', onEnd);
-                                    qel.classList.add('created-active');
-                                });
-
-                                await animate(qel, [{ background: 'transparent' }, { background: 'rgba(0, 117, 227, 0.10)' }], 600);
-                                await Promise.all([...qel.children].map(c => animate(c, [{ opacity: 0 }, { opacity: 1 }], 600)));
-                                await Promise.all([
-                                    animate(qel, [{ background: 'rgba(0, 117, 227, 0.10)' }, { background: 'transparent' }], 300),
-                                    animate(qel, [{ border: '2px solid #0075E3' }, { borderColor: 'transparent' }], 300)
-                                ])
-                            }
-
-                            const runDeletedAnimation = async (qid) => {
-                                const qel = document.getElementById('id_' + qid);
-                                qel.style.cssText = 'border-radius: 8px; background:transparent; overflow:hidden;';
-
-                                await new Promise(resolve => {
-                                    const onEnd = (e) => {
-                                        if (e.propertyName === 'height' && e.pseudoElement === '::after') {
-                                            qel.removeEventListener('transitionend', onEnd);
-                                            qel.classList.remove('deleted-active');
-                                            qel.style.border = '2px solid #DC2626'
-                                            resolve();
-                                        }
-                                    };
-                                    qel.addEventListener('transitionend', onEnd);
-                                    qel.classList.add('deleted-active');
-                                });
-                                await animate(qel, [{ background: 'transparent' }, { background: 'rgba(220, 38, 38, 0.10)' }], 1000);
-                                await animate(qel, [{ opacity: 1 }, { opacity: 0 }], 600);
-                                qel.remove();
-                            }
-
-                            if (changes.created && Array.isArray(changes.created)) {
-                                changes.created.forEach((item, index) => {
-                                    const questionElement = document.querySelector('#id_' + item.qid);
-                                    questionElement.classList.add('question-draw');
-                                    questionElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    setTimeout(() => {
-                                        runCreatedAnimation(item.qid);
-                                    }, index * 100); // Stagger by 100ms
-                                });
-                            }
-
-                            if (changes.deleted && Array.isArray(changes.deleted)) {
-                                changes.deleted.forEach((item, index) => {
-                                    const questionElement = document.querySelector('#id_' + item.qid);
-                                    questionElement.classList.add('question-draw');
-                                    questionElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    setTimeout(() => {
-                                        runDeletedAnimation(item.qid);
-                                    }, index * 100);
-                                });
-                            }
+                            questionElement.scrollIntoView({ behavior: 'smooth', block: 'center', container: 'nearest' });
+                            await new Promise((resolve) => {
+                                setTimeout(() => {
+                                    resolve();
+                                }, 1000);
+                            });
+                            await new Promise(resolve => window.FormFieldAnimationUtils.restartAnimation(questionElement, animationName, resolve));
                         };
+
+                        const handleChanges = function(changes) {
+                            if (changes.created && Array.isArray(changes.created)) {
+                                changes.created.forEach(item => {
+                                    const questionElement = document.querySelector('#id_' + item.qid);
+                                    if (questionElement) {
+                                        questionElement.style.opacity = '0'
+                                    }
+                                });
+                                Promise.all(changes.created.map(async (item) => {
+                                    await animateQuestion(item.qid, 'AICreated');
+                                }));
+                            }
+                            if (changes.deleted && Array.isArray(changes.deleted)) {
+                                Promise.all(changes.deleted.map(async (item) => {
+                                    await animateQuestion(item.qid, 'AIDeleted');
+                                }));
+                            }
+                            window.parent.postMessage('formChangesHandled', '*');
+                        };
+
                         const initQuestions = async function () {
                             if (!hideFieldsOnInit) return;
                             const questionElements = document.querySelectorAll('.form-line');
@@ -13091,7 +13037,6 @@ var JotForm = {
                             JotForm.newHandleIframeHeight();
                             window.scrollTo({ top: 0, behavior: 'smooth' });
                         }
-                        // Inject animation styles for form changes
                         const formChangesAnimationStyle = document.createElement('style');
                         const isFullScreen = window.openai ? window.openai.displayMode === 'fullscreen' : false;
                         formChangesAnimationStyle.textContent = `
@@ -13109,80 +13054,6 @@ var JotForm = {
                                     transform: translateX(0);
                                     opacity: 1;
                                 }
-                            }
-
-                            .question-draw {
-                                --radius: 10px;
-
-                                position: relative;
-                                transition: color 0.25s;
-                                border-radius: var(--radius);
-                            }
-
-                            .question-draw::before,
-                            .question-draw::after {
-                                content: "";
-                                position: absolute;
-                                border: 2px solid transparent;
-                                border-radius: var(--radius);
-                                width: 0;
-                                height: 0;
-                            }
-
-                            .question-draw::before {
-                                top: 0;
-                                left: 0;
-                            }
-
-                            .question-draw::after {
-                                bottom: 0;
-                                right: 0;
-                            }
-
-                            .question-draw.created-active {
-                                color: #0075E3;
-                            }
-
-                            .question-draw.created-active::before,
-                            .question-draw.deleted-active::before,
-                            .question-draw.created-active::after,
-                            .question-draw.deleted-active::after {
-                                width: 100%;
-                                height: 100%;
-                            }
-
-                            .question-draw.created-active::before {
-                                border-top-color: #0075E3;
-                                border-right-color: #0075E3;
-                                transition:
-                                    width 0.25s ease-out,
-                                    height 0.25s ease-out 0.25s;
-                            }
-
-                            .question-draw.deleted-active::before {
-                                border-top-color: #DC2626;
-                                border-right-color: #DC2626;
-                                transition:
-                                    width 0.5s ease-out,
-                                    height 0.25s ease-out 0.5s;
-                            }
-
-                            .question-draw.deleted-active::after {
-                                border-bottom-color: #DC2626;
-                                border-left-color: #DC2626;
-                                transition:
-                                    border-color 0s ease-out 0.75s,
-                                    width 0.5s ease-out 0.75s,
-                                    height 0.25s ease-out 1.25s;
-                            }
-
-                            .question-draw.created-active::after {
-                                border-bottom-color: #0075E3;
-                                border-left-color: #0075E3;
-                                transition:
-                                    border-color 0s ease-out 0.5s,
-                                    width 0.25s ease-out 0.5s,
-                                    height 0.25s ease-out 0.75s;
                             }
                         `;
                         document.head.appendChild(formChangesAnimationStyle);
@@ -13873,6 +13744,7 @@ var JotForm = {
                 JotForm.countTotal(JotForm.prices);
             }
             trackExecution('init-complete');
+            initParagraphSpacingTest();
         }.bind(this);
 
         // eslint-disable-next-line no-var
@@ -37155,6 +37027,17 @@ function nameInputListenerForAssistantTooltip() {
   catch (e)  {
       console.log(e);
   }
+}
+
+function initParagraphSpacingTest() {
+    const searchParams = new URLSearchParams(window.location.search);
+    const newParagraphSpacing = searchParams.get('newParagraphSpacing');
+    if (newParagraphSpacing) {
+        const formHtmlDivs = document.querySelectorAll('li.form-line[data-type="control_text"] .form-html');
+        formHtmlDivs.forEach(formHtmlDiv => {
+            formHtmlDiv.classList.add('new-paragraph-spacing');
+        });
+    }
 }
 
 //

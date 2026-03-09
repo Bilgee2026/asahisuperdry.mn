@@ -79,9 +79,21 @@
     nextButton.disabled = false;
   }
 
+  function isNewErrorCount() {
+    const domErrorCount = state.section
+      ? state.section.querySelectorAll('.form-line.form-line-error').length
+      : document.querySelectorAll('.form-all .form-line.form-line-error').length;
+    const stateErrorCount = state.errors.length;
+    return domErrorCount !== stateErrorCount;
+  }
+
   function focusToNextError() {
     var nextButton = document.querySelector('.error-navigation-next-button');
     nextButton.disabled = true;
+
+    // reset current index if error count has changed
+    if (isNewErrorCount()) state.current = -1;
+
     var nextCurrent = (state.current + 1) % state.errors.length;
     var erroredLine = state.errors[nextCurrent];
     if (!erroredLine) {
@@ -181,6 +193,9 @@
         destroyNavigation(state.section);
         return;
       }
+
+      // reset current index if error count has changed
+      if (isNewErrorCount()) state.current = -1;
 
       state.errors = invalidFields;
 
